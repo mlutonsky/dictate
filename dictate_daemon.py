@@ -222,7 +222,9 @@ def _do_toggle():
         log(f"Result: {result!r}")
 
         if result and result.strip():
-            subprocess.run(["wl-copy", result.strip()])
+            # Don't touch the clipboard here — the ydotool wrapper owns it. It saves the
+            # clipboard, pastes, and restores; copying the transcript first would just make
+            # it save (and restore) the transcript, defeating the whole thing.
             r = subprocess.run(["ydotool", "type", result.strip()])
             log(f"ydotool type done: rc={r.returncode}")
             if r.returncode != 0:
