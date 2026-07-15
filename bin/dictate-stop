@@ -1,0 +1,28 @@
+#!/bin/bash
+# Usage: dictate-stop
+# Stops the dictation daemon and frees its VRAM (~14GB).
+# The daemon has no unload-but-stay-alive signal, so freeing VRAM means killing it.
+# Start it again with: dictate-daemon   (or: dictate-restart)
+PID_FILE="/tmp/dictate_daemon.pid"
+
+pid=""
+[ -f "$PID_FILE" ] && pid="$(cat "$PID_FILE" 2>/dev/null)"
+if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid"
+else
+    pkill -f dictate_daemon.py
+fi
+
+# wait up to ~5s for the process (and its VRAM) to actually go away
+for _ in $(seq 1 25); do
+    pgrep -f dictate_daemon.py >/dev/null || break
+    sleep 0.2
+done
+
+if pgrep -f dictate_daemon.py >/dev/null; then
+    notify-send -t 4000 "Dictation" "Daemon still running — forcing kill"
+    pkill -9 -f dictate_daemon.py
+fi
+
+rm -f "$PID_FILE"
+notify-send -t 3000 "Dictation" "Daemon stopped · VRAM freed"

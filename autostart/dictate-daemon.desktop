@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Dictation Daemon (Canary + Parakeet)
+Exec=/home/YOUR_USER/.local/bin/dictate-daemon
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true

@@ -1,0 +1,12 @@
+#!/bin/bash
+# Usage: dictate [cs|en|de|fr|sk|es]  (default: cs)
+DICT_LANG="${1:-cs}"
+PID_FILE="/tmp/dictate_daemon.pid"
+
+if [ ! -f "$PID_FILE" ]; then
+    notify-send -t 4000 "Dictation" "Daemon not running. Start it with: dictate-daemon"
+    exit 1
+fi
+
+echo "$DICT_LANG" > /tmp/dictate_lang
+kill -USR1 "$(cat "$PID_FILE")"

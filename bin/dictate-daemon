@@ -1,0 +1,8 @@
+#!/bin/bash
+VENV=~/.local/share/dictate/venv
+# onnxruntime-gpu is built against CUDA 12; bundle every nvidia/*/lib wheel dir so the
+# CUDA provider never depends on the system CUDA (Fedora 44 replaced it with CUDA 13).
+NVIDIA_LIBS=$(ls -d "$VENV"/lib/python3.12/site-packages/nvidia/*/lib 2>/dev/null | tr '\n' ':')
+export LD_LIBRARY_PATH="$NVIDIA_LIBS$LD_LIBRARY_PATH"
+export YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket"
+exec "$VENV/bin/python" ~/.local/share/dictate/dictate_daemon.py "$@"
