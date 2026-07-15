@@ -2,7 +2,7 @@
 # Usage: dictate-restart
 # Stops the daemon (freeing VRAM), then relaunches it detached so it survives
 # the calling terminal. NOTE: a restart reloads both models, so VRAM climbs back
-# to ~14GB after warm-up. To keep VRAM free, use dictate-stop and don't restart.
+# to ~8.8GB after warm-up. To keep VRAM free, use dictate-stop and don't restart.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 "$DIR/dictate-stop"
