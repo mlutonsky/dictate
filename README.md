@@ -106,15 +106,31 @@ First `dictate-daemon` run downloads both models (~6 GB) and takes a few minutes
 keystroke by keystroke, pipes it into `wl-copy` and presses Ctrl+V. Everything else is passed
 through to the real binary.
 
-This exists because per-character typing was unreliable and slow. The trade-offs are real and
-worth knowing:
+**This is not a workaround waiting to be removed — on GNOME/Wayland it is the only thing that
+works.** Both alternatives are dead ends:
 
-- **Every dictation overwrites your clipboard.**
-- It requires `wl-copy` (Wayland) and a focused window that accepts Ctrl+V.
+- `ydotool type` emits **raw US keycodes** ("there's no way to know how many keyboard layouts are
+  there in the world, we're using raw keycodes now" — its own help). Czech diacritics have no US
+  keycode, so they are silently dropped; and with a `cz+qwerty` layout active even ASCII comes out
+  scrambled, because the app decodes the keycodes through whatever layout is current.
+- `wtype` builds its own keymap and would handle any character, but it needs the
+  `virtual-keyboard` protocol, which Mutter does not implement: *"Compositor does not support the
+  virtual keyboard protocol"*.
+
+The wrapper saves the clipboard before pasting and restores it afterwards, so dictation no longer
+destroys what you had copied. What to know:
+
+- **Restore is timing-based, not synchronised.** After Ctrl+V the app fetches the data within
+  milliseconds; the wrapper waits `YDOTOOL_CLIP_RESTORE_DELAY` (default 0.5s) before restoring —
+  a ~100x margin. If it were ever too short, the app would read the *restored* content and paste
+  the wrong text. Proper synchronisation is impossible here: `wl-copy --paste-once` would say
+  exactly when the paste happened, but GNOME's clipboard manager reads the selection itself and
+  consumes that single serve immediately.
+- **One MIME type is restored**, preferring UTF-8 text; `image/*` survives too. Multi-type offers
+  (PhpStorm publishes a Java cookie plus a dozen encodings) can't be reproduced faithfully.
+- It requires `wl-copy`/`wl-paste` and a focused window that accepts Ctrl+V.
 - It shadows a system binary from `/usr/local/bin`, which is surprising to anyone debugging this
   later — including you. If dictation records fine but no text appears, look here first.
-
-Replacing it with plain `ydotool type` is the obvious cleanup if the reliability problem is gone.
 
 ## Gotchas
 
@@ -148,6 +164,7 @@ it. Removing it does not do what it looks like it does.
 |---|---|
 | Shortcut does nothing | Is the daemon alive? `pgrep -af dictate_daemon.py`, then `~/.local/share/dictate/daemon.log`. |
 | Records, but no text appears | The ydotool wrapper — is `ydotoold` running, does `wl-copy` work, does the window take Ctrl+V? |
+| Paste inserts your *old* clipboard | The restore delay is too short for that app: raise `YDOTOOL_CLIP_RESTORE_DELAY`. |
 | Suddenly ~5x slower | It's on CPU. `nvidia-smi` (above); expect a FATAL in the log now. |
 | `Nothing recognized.` | Empty/silent capture — check the PipeWire input source. |
 | VRAM needed elsewhere | `dictate-stop`; `dictate-restart` brings it back. |
