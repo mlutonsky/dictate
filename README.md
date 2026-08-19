@@ -8,24 +8,22 @@ Czech in, English out (or vice versa) works too: the Canary model translates as 
 
 ## What it does
 
-Two NVIDIA speech models stay resident in VRAM behind a small daemon:
+One NVIDIA speech model stays resident in VRAM behind a small daemon:
 
 | Model | Type | What it's for |
 |---|---|---|
 | `canary` (nemo-canary-1b-v2) | AED | **Translates.** Output language follows the shortcut you press — speak Czech, hit `Alt+.`, get English. |
-| `parakeet` (nemo-parakeet-tdt-0.6b-v3) | TDT | ASR only, ~4-5x faster, slightly better same-language accuracy. Ignores the language choice; cannot translate. |
 
-Both are the ONNX ports by [istupakov](https://huggingface.co/istupakov), driven through
+It is the ONNX port by [istupakov](https://huggingface.co/istupakov), driven through
 [`onnx_asr`](https://github.com/istupakov/onnx-asr) on onnxruntime-gpu. NeMo itself is not used.
 
-Together they occupy ~8.8 GB of VRAM. Transcription runs roughly 25x faster than realtime.
+It occupies ~5.3 GB of VRAM. Transcription runs roughly 25x faster than realtime.
 
 ## How it works
 
 ```
 Alt+, ──> dictate cs ──┐
 Alt+. ──> dictate en ──┼──> writes /tmp/dictate_lang, sends SIGUSR1 ──> dictate_daemon.py
-Alt+/ ──> dictate-model ──> writes /tmp/dictate_model                       │
                                                                             │
                     record (PipeWire, 48kHz) ──> resample to 16kHz ─────────┤
                     transcribe on GPU ──> ydotool ──> text into focused window
@@ -34,12 +32,12 @@ Alt+/ ──> dictate-model ──> writes /tmp/dictate_model                   
 The daemon is a single long-running process started at login. It has no IPC beyond signals:
 
 - **`SIGUSR1` toggles recording.** First press starts, second stops and transcribes.
-- **`/tmp/dictate_lang`** holds the target language, **`/tmp/dictate_model`** the model. Both are
-  read at the *start of a recording*, so switching models never interrupts one in flight.
+- **`/tmp/dictate_lang`** holds the target language. It is read at the *start of a recording*, so
+  switching languages never interrupts one in flight.
 - **`/tmp/dictate_daemon.pid`** is how the shortcuts find the daemon.
 - Media players are paused during recording and resumed afterwards (via `playerctl`).
 
-Keeping both models preloaded is the whole point: model load takes ~5s, so loading on demand would
+Keeping the model preloaded is the whole point: model load takes ~5s, so loading on demand would
 make every dictation unusable. The cost is the VRAM; `dictate-stop` reclaims it.
 
 ## Commands
@@ -47,20 +45,19 @@ make every dictation unusable. The cost is the VRAM; `dictate-stop` reclaims it.
 | Command | Does |
 |---|---|
 | `dictate [cs\|en\|de\|fr\|sk\|es]` | Toggle recording; the argument is the **target** language (default `cs`). |
-| `dictate-model [canary\|parakeet]` | Switch model; no argument toggles. |
 | `dictate-daemon` | Start the daemon in the foreground. |
 | `dictate-stop` | Stop it and free the VRAM. |
-| `dictate-restart` | Stop, relaunch detached, reload models. |
+| `dictate-restart` | Stop, relaunch detached, reload the model. |
 
-Default shortcuts: `Alt+,` Czech · `Alt+.` English · `Alt+/` switch model.
+Default shortcuts: `Alt+,` Czech · `Alt+.` English.
 
 ## Requirements
 
-- **NVIDIA GPU with ~9 GB free VRAM** and a driver supporting CUDA 12 (both models resident).
+- **NVIDIA GPU with ~5.5 GB free VRAM** and a driver supporting CUDA 12.
 - **Python 3.12** — the venv is built with [`uv`](https://github.com/astral-sh/uv).
 - **PipeWire** for capture, **ydotool** for typing, **playerctl** for the pause/resume, **wl-copy**
   (see the ydotool section below), `notify-send` for the desktop notifications.
-- ~6.1 GB of disk for the models, cached in `~/.cache/huggingface` on first run.
+- ~3.7 GB of disk for the model, cached in `~/.cache/huggingface` on first run.
 
 CUDA itself is **not** required system-wide — every CUDA library is pulled into the venv as an
 `nvidia-*-cu12` wheel. That is deliberate; see Gotchas.
@@ -77,7 +74,7 @@ uv pip install --python ~/.local/share/dictate/venv/bin/python -r requirements.t
 
 # 2. symlink the scripts and the daemon into place
 mkdir -p ~/.local/bin ~/.local/share/dictate
-for f in dictate dictate-daemon dictate-model dictate-restart dictate-stop; do
+for f in dictate dictate-daemon dictate-restart dictate-stop; do
     ln -sf "$PWD/bin/$f" ~/.local/bin/$f
 done
 ln -sf "$PWD/dictate_daemon.py" ~/.local/share/dictate/dictate_daemon.py
@@ -90,14 +87,13 @@ cp systemd/ydotoold.service ~/.config/systemd/user/
 systemctl --user enable --now ydotoold
 sudo cp ydotool-clipboard-wrapper.sh /usr/local/bin/ydotool   # see caveat below
 
-# 5. GNOME shortcuts — bind these commands to Alt+, Alt+. and Alt+/
+# 5. GNOME shortcuts — bind these commands to Alt+, and Alt+.
 #    Settings > Keyboard > Custom Shortcuts:
 #      ~/.local/bin/dictate cs        Alt+comma
 #      ~/.local/bin/dictate en        Alt+period
-#      ~/.local/bin/dictate-model     Alt+slash
 ```
 
-First `dictate-daemon` run downloads both models (~6 GB) and takes a few minutes.
+First `dictate-daemon` run downloads the model (~3.7 GB) and takes a few minutes.
 
 ## Text insertion, and the ydotool wrapper
 
@@ -146,12 +142,12 @@ can no longer touch this.
 `CUDAExecutionProvider` even when its `.so` cannot be loaded, so logs look healthy while the GPU
 sits idle. onnxruntime does log the real error — but on native stderr, which autostart sends to
 `/dev/null`. Only a session's own `get_providers()` tells the truth, so `assert_on_gpu()` checks
-each one after load and hard-exits with a desktop notification rather than running slowly.
+every session after load and hard-exits with a desktop notification rather than running slowly.
 
 Verify by hand any time:
 
 ```bash
-nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv   # expect ~8.8 GB
+nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv   # expect ~5.3 GB
 ```
 
 **Do not try to fail fast by dropping `CPUExecutionProvider` from the providers list.** onnxruntime

@@ -1,11 +1,11 @@
 #!/bin/bash
 # Usage: dictate-restart
 # Stops the daemon (freeing VRAM), then relaunches it detached so it survives
-# the calling terminal. NOTE: a restart reloads both models, so VRAM climbs back
-# to ~8.8GB after warm-up. To keep VRAM free, use dictate-stop and don't restart.
+# the calling terminal. NOTE: a restart reloads the model, so VRAM climbs back
+# to ~5.3GB after warm-up. To keep VRAM free, use dictate-stop and don't restart.
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
 "$DIR/dictate-stop"
 sleep 1
 setsid -f "$DIR/dictate-daemon"
-notify-send -t 3000 "Dictation" "Daemon restarting · models reloading…"
+notify-send -t 3000 "Dictation" "Daemon restarting · model reloading…"

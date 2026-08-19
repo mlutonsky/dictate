@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""Dictation daemon (Canary-1B-v2 + Parakeet-TDT-0.6B-v3). Send SIGUSR1 to toggle recording.
+"""Dictation daemon (Canary-1B-v2). Send SIGUSR1 to toggle recording.
 
-Both models are preloaded into VRAM. /tmp/dictate_model selects which one is used
-for the next recording (canary|parakeet); /tmp/dictate_lang selects the language.
+The model is preloaded into VRAM; /tmp/dictate_lang selects the language.
 
-  canary   = AED, translates: output language follows /tmp/dictate_lang (target_language).
-  parakeet = TDT, ASR only: transcribes the spoken language, ignores language.
+  canary = AED, translates: output language follows /tmp/dictate_lang (target_language).
 """
 
 import signal
@@ -28,17 +26,13 @@ TARGET_RATE = 16000
 DEVICE = "pipewire"
 LANG_FILE = "/tmp/dictate_lang"
 SUPPORTED_LANGS = {"cs", "en", "de", "fr", "sk", "es"}
-MODEL_FILE = "/tmp/dictate_model"
-SUPPORTED_MODELS = {"canary", "parakeet"}
-DEFAULT_MODEL = "canary"
-ONNX_MODEL_IDS = {"canary": "nemo-canary-1b-v2", "parakeet": "nemo-parakeet-tdt-0.6b-v3"}
+ONNX_MODEL_ID = "nemo-canary-1b-v2"
 
-models = {}
+model = None
 recording = False
 audio_chunks = []
 stream = None
 current_lang = "cs"
-current_model = DEFAULT_MODEL
 toggle_event = threading.Event()
 
 
@@ -64,8 +58,8 @@ def iter_sessions(obj, rt, _depth=0):
                 yield f"{name}.{path}", sess
 
 
-def assert_on_gpu(key, model, rt):
-    """Fail loudly if a model silently landed on CPU.
+def assert_on_gpu(model, rt):
+    """Fail loudly if the model silently landed on CPU.
 
     get_available_providers() lists CUDAExecutionProvider even when its .so can't be
     loaded (missing/mismatched CUDA libs — e.g. a distro upgrade swapping CUDA 12 for 13).
@@ -74,20 +68,20 @@ def assert_on_gpu(key, model, rt):
     """
     sessions = list(iter_sessions(model, rt))
     if not sessions:
-        log(f"WARNING: found no sessions on {key} — cannot verify GPU use.")
+        log("WARNING: found no sessions on canary — cannot verify GPU use.")
         return
     on_cpu = [path for path, s in sessions if "CUDAExecutionProvider" not in s.get_providers()]
     if on_cpu:
-        log(f"FATAL: {key} is running on CPU, not GPU (sessions: {', '.join(on_cpu)}).")
+        log(f"FATAL: canary is running on CPU, not GPU (sessions: {', '.join(on_cpu)}).")
         log("       CUDA provider failed to load — check LD_LIBRARY_PATH and the")
         log("       nvidia-*-cu12 wheels in the venv (ldd libonnxruntime_providers_cuda.so).")
-        notify("Dictation FAILED", f"{key} fell back to CPU — GPU unavailable. Daemon stopped.")
+        notify("Dictation FAILED", "canary fell back to CPU — GPU unavailable. Daemon stopped.")
         raise SystemExit(1)
-    log(f"{key} on GPU ({len(sessions)} sessions).")
+    log(f"canary on GPU ({len(sessions)} sessions).")
 
 
-def load_models():
-    global models
+def load_model():
+    global model
     import onnx_asr
     import onnxruntime as rt
     # We don't have TensorRT (libnvinfer) installed and don't need it — dropping it
@@ -95,13 +89,12 @@ def load_models():
     # CUDA stays first (GPU), CPU is the fallback (used for the preprocessor/resampler).
     providers = [p for p in rt.get_available_providers() if p != "TensorrtExecutionProvider"]
     log(f"Providers: {providers}")
-    for key in ("canary", "parakeet"):
-        log(f"Loading {key} ({ONNX_MODEL_IDS[key]})...")
-        notify("Dictation", f"Loading {key} model, please wait...")
-        models[key] = onnx_asr.load_model(ONNX_MODEL_IDS[key], providers=providers)
-        assert_on_gpu(key, models[key], rt)
-    log("Models ready.")
-    notify("Dictation", "Models ready (canary+parakeet). Use Alt+, to start.")
+    log(f"Loading canary ({ONNX_MODEL_ID})...")
+    notify("Dictation", "Loading canary model, please wait...")
+    model = onnx_asr.load_model(ONNX_MODEL_ID, providers=providers)
+    assert_on_gpu(model, rt)
+    log("Model ready.")
+    notify("Dictation", "Model ready (canary). Use Alt+, to start.")
 
 
 def notify(title, body):
@@ -162,24 +155,13 @@ def _read_lang() -> str:
     return "cs"
 
 
-def _read_model() -> str:
-    try:
-        m = open(MODEL_FILE).read().strip()
-        if m in SUPPORTED_MODELS:
-            return m
-    except Exception:
-        pass
-    return DEFAULT_MODEL
-
-
 def _do_toggle():
-    global recording, audio_chunks, stream, current_lang, current_model
+    global recording, audio_chunks, stream, current_lang
 
     log(f"Toggle received, recording={recording}")
 
     if not recording:
         current_lang = _read_lang()
-        current_model = _read_model()
         pause_media()
         audio_chunks = []
         recording = True
@@ -191,11 +173,8 @@ def _do_toggle():
             callback=audio_callback,
         )
         stream.start()
-        log(f"Recording started (model={current_model}, lang={current_lang}).")
-        if current_model == "canary":
-            notify("Dictation", f"Recording · CANARY → {current_lang.upper()}")
-        else:
-            notify("Dictation", "Recording · PARAKEET (spoken lang)")
+        log(f"Recording started (lang={current_lang}).")
+        notify("Dictation", f"Recording · CANARY → {current_lang.upper()}")
     else:
         recording = False
         stream.stop()
@@ -213,12 +192,8 @@ def _do_toggle():
         audio_16k = resampler.resample_poly(audio, TARGET_RATE, RECORD_RATE).astype(np.int16)
         wav.write(WAV_FILE, TARGET_RATE, audio_16k)
 
-        log(f"Transcribing (model={current_model}, lang={current_lang})...")
-        m = models[current_model]
-        if current_model == "canary":
-            result = m.recognize(WAV_FILE, language=current_lang, target_language=current_lang)
-        else:
-            result = m.recognize(WAV_FILE)
+        log(f"Transcribing (lang={current_lang})...")
+        result = model.recognize(WAV_FILE, language=current_lang, target_language=current_lang)
         log(f"Result: {result!r}")
 
         if result and result.strip():
@@ -299,7 +274,7 @@ if __name__ == "__main__":
         f.write(str(os.getpid()))
 
     try:
-        load_models()
+        load_model()
         signal.signal(signal.SIGUSR1, handle_toggle)
 
         watchdog = threading.Thread(target=watchdog_loop, daemon=True, name="watchdog")

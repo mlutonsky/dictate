@@ -1,6 +1,6 @@
 #!/bin/bash
 # Usage: dictate-stop
-# Stops the dictation daemon and frees its VRAM (~8.8GB).
+# Stops the dictation daemon and frees its VRAM (~5.3GB).
 # The daemon has no unload-but-stay-alive signal, so freeing VRAM means killing it.
 # Start it again with: dictate-daemon   (or: dictate-restart)
 PID_FILE="/tmp/dictate_daemon.pid"

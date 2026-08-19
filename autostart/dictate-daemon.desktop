@@ -1,6 +1,6 @@
 [Desktop Entry]
 Type=Application
-Name=Dictation Daemon (Canary + Parakeet)
+Name=Dictation Daemon (Canary)
 Exec=/home/YOUR_USER/.local/bin/dictate-daemon
 Hidden=false
 NoDisplay=false
