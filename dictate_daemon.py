@@ -24,6 +24,7 @@ PAUSED_PLAYERS_FILE = "/tmp/dictate_paused_players"
 RECORD_RATE = 48000
 TARGET_RATE = 16000
 DEVICE = "pipewire"
+SCRIPT_NAME = "dictate_daemon.py"
 LANG_FILE = "/tmp/dictate_lang"
 SUPPORTED_LANGS = {"cs", "en", "de", "fr", "sk", "es"}
 ONNX_MODEL_ID = "nemo-canary-1b-v2"
@@ -241,6 +242,25 @@ def watchdog_loop():
         log("WARNING: main_loop thread died — restarting.")
 
 
+def _is_daemon_cmdline(cmdline: str) -> bool:
+    """True only for a python process actually running this script.
+
+    A bare substring match also catches processes that merely *mention* the
+    script — `pgrep -f dictate_daemon.py`, a grep, the shell running either —
+    and the daemon then refuses to start, claiming it is already up. So split
+    the NUL-separated argv and require the script to be an argument of a python
+    interpreter, or argv[0] itself when launched through the shebang.
+    """
+    argv = [a for a in cmdline.split("\0") if a]
+    if not argv:
+        return False
+    if os.path.basename(argv[0]) == SCRIPT_NAME:
+        return True
+    if not os.path.basename(argv[0]).startswith("python"):
+        return False
+    return any(os.path.basename(a) == SCRIPT_NAME for a in argv[1:])
+
+
 def already_running():
     """Return the PID of another live dictate daemon, else None.
     Scans /proc directly so it stays reliable even when the PID file was lost
@@ -258,7 +278,7 @@ def already_running():
                 cmdline = f.read().decode("utf-8", "replace")
         except (FileNotFoundError, ProcessLookupError, PermissionError):
             continue
-        if "dictate_daemon.py" in cmdline:
+        if _is_daemon_cmdline(cmdline):
             return pid
     return None
 
