@@ -35,7 +35,9 @@ The daemon is a single long-running process started at login. It has no IPC beyo
 - **`/tmp/dictate_lang`** holds the target language. It is read at the *start of a recording*, so
   switching languages never interrupts one in flight.
 - **`/tmp/dictate_daemon.pid`** is how the shortcuts find the daemon.
-- Media players are paused during recording and resumed afterwards (via `playerctl`).
+- The default audio output is muted during recording and unmuted afterwards (via `pactl`), so
+  live streams keep playing; the volume itself is never touched, and an output you muted yourself
+  stays muted.
 
 Keeping the model preloaded is the whole point: model load takes ~5s, so loading on demand would
 make every dictation unusable. The cost is the VRAM; `dictate-stop` reclaims it.
@@ -55,8 +57,8 @@ Default shortcuts: `Alt+,` Czech · `Alt+.` English.
 
 - **NVIDIA GPU with ~5.5 GB free VRAM** and a driver supporting CUDA 12.
 - **Python 3.12** — the venv is built with [`uv`](https://github.com/astral-sh/uv).
-- **PipeWire** for capture, **ydotool** for typing, **playerctl** for the pause/resume, **wl-copy**
-  (see the ydotool section below), `notify-send` for the desktop notifications.
+- **PipeWire** for capture, **ydotool** for typing, **pactl** (pipewire-pulse) for the mute/unmute,
+  **wl-copy** (see the ydotool section below), `notify-send` for the desktop notifications.
 - ~3.7 GB of disk for the model, cached in `~/.cache/huggingface` on first run.
 
 CUDA itself is **not** required system-wide — every CUDA library is pulled into the venv as an

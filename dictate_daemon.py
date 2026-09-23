@@ -20,7 +20,7 @@ import scipy.signal as resampler
 DAEMON_PID_FILE = "/tmp/dictate_daemon.pid"
 WAV_FILE = "/tmp/dictate_audio.wav"
 LOG_FILE = os.path.expanduser("~/.local/share/dictate/daemon.log")
-PAUSED_PLAYERS_FILE = "/tmp/dictate_paused_players"
+MUTED_SINK_FILE = "/tmp/dictate_muted_sink"
 RECORD_RATE = 48000
 TARGET_RATE = 16000
 DEVICE = "pipewire"
@@ -111,39 +111,42 @@ def handle_toggle(signum, frame):
     toggle_event.set()
 
 
-def pause_media():
-    """Pause all currently-playing MPRIS players; remember them for resume."""
+def mute_output():
+    """Mute the default audio sink; remember it for unmute.
+
+    Muting (not pausing players) keeps live streams running, and leaves the volume
+    itself untouched. A sink that was already muted is left alone — and not recorded,
+    so unmute_output() won't unmute something the user muted.
+    """
     try:
-        listing = subprocess.run(
-            ["playerctl", "-l"], capture_output=True, text=True, check=False
-        )
-    except FileNotFoundError:
-        return
-    paused = []
-    for p in listing.stdout.split():
-        status = subprocess.run(
-            ["playerctl", "-p", p, "status"], capture_output=True, text=True, check=False
+        sink = subprocess.run(
+            ["pactl", "get-default-sink"], capture_output=True, text=True, check=False
         ).stdout.strip()
-        if status == "Playing":
-            subprocess.run(["playerctl", "-p", p, "pause"], check=False)
-            paused.append(p)
-    if paused:
-        with open(PAUSED_PLAYERS_FILE, "w") as f:
-            f.write("\n".join(paused))
-        log(f"Paused players: {paused}")
-
-
-def resume_media():
-    """Resume only the players we paused."""
-    try:
-        with open(PAUSED_PLAYERS_FILE) as f:
-            paused = [p for p in f.read().split("\n") if p]
-        os.remove(PAUSED_PLAYERS_FILE)
     except FileNotFoundError:
         return
-    for p in paused:
-        subprocess.run(["playerctl", "-p", p, "play"], check=False)
-    log(f"Resumed players: {paused}")
+    if not sink:
+        return
+    muted = subprocess.run(
+        ["pactl", "get-sink-mute", sink], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    if muted != "Mute: no":
+        return
+    subprocess.run(["pactl", "set-sink-mute", sink, "1"], check=False)
+    with open(MUTED_SINK_FILE, "w") as f:
+        f.write(sink)
+    log(f"Muted sink: {sink}")
+
+
+def unmute_output():
+    """Unmute only the sink we muted."""
+    try:
+        with open(MUTED_SINK_FILE) as f:
+            sink = f.read().strip()
+        os.remove(MUTED_SINK_FILE)
+    except FileNotFoundError:
+        return
+    subprocess.run(["pactl", "set-sink-mute", sink, "0"], check=False)
+    log(f"Unmuted sink: {sink}")
 
 
 def _read_lang() -> str:
@@ -163,7 +166,7 @@ def _do_toggle():
 
     if not recording:
         current_lang = _read_lang()
-        pause_media()
+        mute_output()
         audio_chunks = []
         recording = True
         stream = sd.InputStream(
@@ -181,7 +184,7 @@ def _do_toggle():
         stream.stop()
         stream.close()
         stream = None
-        resume_media()
+        unmute_output()
 
         if not audio_chunks:
             log("No audio captured.")
@@ -230,7 +233,7 @@ def main_loop():
                 except Exception:
                     pass
                 stream = None
-            resume_media()
+            unmute_output()
 
 
 def watchdog_loop():
