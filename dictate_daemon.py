@@ -28,11 +28,15 @@ SCRIPT_NAME = "dictate_daemon.py"
 LANG_FILE = "/tmp/dictate_lang"
 SUPPORTED_LANGS = {"cs", "en", "de", "fr", "sk", "es"}
 ONNX_MODEL_ID = "nemo-canary-1b-v2"
+# A forgotten recording gets transcribed in one go; 46 min of audio ran the GPU out
+# of memory, and onnxruntime's arena then keeps the ~14 GB until a restart.
+MAX_RECORDING_SECONDS = 5 * 60
 
 model = None
 recording = False
 audio_chunks = []
 stream = None
+recording_timer = None
 current_lang = "cs"
 toggle_event = threading.Event()
 
@@ -111,6 +115,20 @@ def handle_toggle(signum, frame):
     toggle_event.set()
 
 
+def auto_stop():
+    if recording:
+        log(f"Recording limit {MAX_RECORDING_SECONDS} s reached — stopping.")
+        notify("Dictation", f"Recording limit {MAX_RECORDING_SECONDS // 60} min reached — stopping.")
+        toggle_event.set()
+
+
+def cancel_recording_timer():
+    global recording_timer
+    if recording_timer:
+        recording_timer.cancel()
+        recording_timer = None
+
+
 def mute_output():
     """Mute the default audio sink; remember it for unmute.
 
@@ -160,7 +178,7 @@ def _read_lang() -> str:
 
 
 def _do_toggle():
-    global recording, audio_chunks, stream, current_lang
+    global recording, audio_chunks, stream, current_lang, recording_timer
 
     log(f"Toggle received, recording={recording}")
 
@@ -177,10 +195,14 @@ def _do_toggle():
             callback=audio_callback,
         )
         stream.start()
+        recording_timer = threading.Timer(MAX_RECORDING_SECONDS, auto_stop)
+        recording_timer.daemon = True
+        recording_timer.start()
         log(f"Recording started (lang={current_lang}).")
         notify("Dictation", f"Recording · CANARY → {current_lang.upper()}")
     else:
         recording = False
+        cancel_recording_timer()
         stream.stop()
         stream.close()
         stream = None
@@ -226,6 +248,7 @@ def main_loop():
             log(traceback.format_exc())
             notify("Dictation", f"Error: {e}")
             recording = False
+            cancel_recording_timer()
             if stream:
                 try:
                     stream.stop()
